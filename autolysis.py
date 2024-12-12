@@ -36,23 +36,21 @@ if not AIPROXY_TOKEN:
 
 BASE_URL = "http://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
 
-def query_chat_completion(prompt, model="gpt-4o-mini"):
+def query_chat_completion(prompt):
     """Send a chat prompt to the LLM and return the response."""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {AIPROXY_TOKEN}"
     }
     payload = {
-        "model": model,
+        "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": prompt}]
     }
-    try:
-        response = requests.post(BASE_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json().get("choices", [{}])[0].get("message", {}).get("content", "No response content returned.")
-    except requests.RequestException as e:
-        raise Exception(f"Error during LLM query: {e}")
-
+    response = requests.post(BASE_URL, headers=headers, json=payload)
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"]
+    else:
+        raise Exception(f"Error {response.status_code}: {response.text}")
     
 def detect_file_encoding(filepath):
     """Detect the encoding of a file."""
