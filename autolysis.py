@@ -21,9 +21,6 @@ import requests
 from sklearn.ensemble import IsolationForest
 from sklearn.impute import SimpleImputer
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.feature_selection import mutual_info_classif
 from dotenv import load_dotenv
 import chardet
 
@@ -36,21 +33,23 @@ if not AIPROXY_TOKEN:
 
 BASE_URL = "http://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
 
-def query_chat_completion(prompt):
+def query_chat_completion(prompt, model="gpt-4o-mini"):
     """Send a chat prompt to the LLM and return the response."""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {AIPROXY_TOKEN}"
     }
     payload = {
-        "model": "gpt-4o-mini",
+        "model": model,
         "messages": [{"role": "user", "content": prompt}]
     }
-    response = requests.post(BASE_URL, headers=headers, json=payload)
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
-    else:
-        raise Exception(f"Error {response.status_code}: {response.text}")
+    try:
+        response = requests.post(BASE_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json().get("choices", [{}])[0].get("message", {}).get("content", "No response content returned.")
+    except requests.RequestException as e:
+        raise Exception(f"Error during LLM query: {e}")
+
     
 def detect_file_encoding(filepath):
     """Detect the encoding of a file."""
@@ -156,116 +155,62 @@ def perform_special_analyses(df, feature_types):
 
     return analyses
 
-def advanced_statistical_analysis(df):
-    """Perform advanced statistical analyses."""
-    numeric_df = df.select_dtypes(include=['float', 'int'])
-    
-    # Advanced statistical tests
-    analysis = {
-        'normality_tests': {},
-        'statistical_significance': {}
-    }
-    
-    # Shapiro-Wilk test for normality
-    for column in numeric_df.columns:
-        stat, p = stats.shapiro(numeric_df[column].dropna())
-        analysis['normality_tests'][column] = {
-            'statistic': stat,
-            'p_value': p,
-            'is_normal_distribution': p > 0.05
-        }
-    
-    # Feature importance using mutual information
-    X = numeric_df.dropna()
-    feature_importance = mutual_info_classif(X, np.zeros(len(X)))
-    analysis['feature_importance'] = dict(zip(X.columns, feature_importance))
-    
-    # Principal Component Analysis
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    pca = PCA()
-    pca.fit(X_scaled)
-    analysis['pca'] = {
-        'explained_variance_ratio': pca.explained_variance_ratio_.tolist(),
-        'cumulative_variance_explained': np.cumsum(pca.explained_variance_ratio_).tolist()
-    }
-    
-    return analysis
-
-def create_enhanced_visualizations(df):
-    """Generate more informative and accessible visualizations."""
-    # Color-blind friendly palette
-    color_blind_palette = sns.color_palette("colorblind")
-    
+def create_visualizations(df):
+    """Generate and save visualizations based on data."""
     numeric_df = preprocess_data(df)
     visualization_df = preprocess_for_visualization(numeric_df)
 
-    # Correlation Heatmap with Improved Labeling
-    plt.figure(figsize=(12, 10))
-    corr_matrix = numeric_df.corr()
-    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))  # Mask to remove redundant triangular portion
-    sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", cbar_kws={'shrink': 0.8}, 
-                mask=mask, square=True, linewidths=0.5, 
-                cbar_kws={'label': 'Correlation Coefficient'})
-    plt.title("Feature Correlation Analysis", fontsize=16, fontweight='bold')
-    plt.tight_layout()
-    plt.savefig("enhanced_correlation_heatmap.png", dpi=300)
-    plt.close()
+    # Correlation Heatmap
+    if numeric_df.shape[1] > 1:
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(numeric_df.corr(), annot=True, cmap="coolwarm", cbar_kws={'shrink': 0.8})
+        plt.title("Correlation Heatmap", fontsize=16)
+        plt.savefig("correlation_heatmap.png")
+        plt.close()
 
-    # Advanced Outlier Detection with More Context
-    plt.figure(figsize=(10, 8))
-    model = IsolationForest(random_state=42, contamination=0.1)
-    visualization_df['outlier_score'] = model.fit_predict(visualization_df)
-    
-    outliers = visualization_df[visualization_df['outlier_score'] == -1]
-    non_outliers = visualization_df[visualization_df['outlier_score'] == 1]
-    
-    plt.scatter(non_outliers.iloc[:, 0], non_outliers.iloc[:, 1], 
-                label='Normal Data Points', color=color_blind_palette[0], alpha=0.7)
-    plt.scatter(outliers.iloc[:, 0], outliers.iloc[:, 1], 
-                label='Potential Outliers', color=color_blind_palette[3], marker='x')
-    
-    plt.title("Advanced Outlier Detection", fontsize=16, fontweight='bold')
-    plt.xlabel(visualization_df.columns[0], fontweight='bold')
-    plt.ylabel(visualization_df.columns[1], fontweight='bold')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("advanced_outlier_detection.png", dpi=300)
-    plt.close()
+    # Outlier Detection with Seaborn Scatter Plot
+    if visualization_df.shape[1] > 1:
+        model = IsolationForest(random_state=42)
+        visualization_df['outlier_score'] = model.fit_predict(visualization_df)
+        plt.figure(figsize=(8, 6))
+        sns.scatterplot(data=visualization_df, x=visualization_df.columns[0], y=visualization_df.columns[1], hue='outlier_score', palette="Set1")
+        plt.title("Outlier Detection (Scatter Plot)", fontsize=16)
+        plt.savefig("outlier_detection.png")
+        plt.close()
 
-    # Enhanced Distribution Analysis
-    plt.figure(figsize=(15, 5))
-    selected_columns = visualization_df.columns[:5]
-    for i, col in enumerate(selected_columns, 1):
-        plt.subplot(1, len(selected_columns), i)
-        sns.histplot(visualization_df[col], kde=True, color=color_blind_palette[i-1])
-        plt.title(f"Distribution of {col}", fontweight='bold')
-        plt.xlabel(col)
-        plt.ylabel("Frequency")
-    plt.tight_layout()
-    plt.savefig("enhanced_distributions.png", dpi=300)
-    plt.close()
+    # Pair Plot for Relationship Analysis (limited columns)
+    if visualization_df.shape[1] > 1:
+        selected_columns = visualization_df.columns[:5]  # Limit to first 5 numeric columns
+        sns.pairplot(visualization_df[selected_columns])
+        plt.savefig("pairplot_analysis.png")
+        plt.close()
 
-    return ["enhanced_correlation_heatmap.png", "advanced_outlier_detection.png", "enhanced_distributions.png"]
+    # Distribution Plot
+    for col in visualization_df.columns[:5]:  # Limit to first 5 numeric columns
+        plt.figure(figsize=(8, 6))
+        sns.histplot(visualization_df[col], kde=True, color="skyblue")
+        plt.title(f"Distribution of {col}", fontsize=16)
+        plt.savefig(f"distribution_{col}.png")
+        plt.close()
 
-def narrate_comprehensive_story(summary, insights, advanced_analysis, charts, special_analyses):
-    """Generate a more integrated and contextual narrative."""
-    # Integrate actual results into the narrative prompt
-    narrative_prompt = (
-        f"Dataset Overview:\n{summary}\n\n"
-        f"Initial Insights:\n{insights}\n\n"
-        f"Advanced Statistical Analysis:\n"
-        f"- Normality Tests: {'Normal' if all(test['is_normal_distribution'] for test in advanced_analysis['normality_tests'].values()) else 'Non-normal'} distribution detected\n"
-        f"- Top Features by Importance: {', '.join(sorted(advanced_analysis['feature_importance'], key=advanced_analysis['feature_importance'].get, reverse=True)[:3])}\n"
-        f"- PCA Variance Explained: {sum(advanced_analysis['pca']['explained_variance_ratio'][:2])*100:.2f}% in first two components\n\n"
-        f"Special Analyses:\n{' '.join([f"{k.capitalize()}: {' '.join(v)}" for k, v in special_analyses.items()])}\n\n"
-        f"Visual Insights from Charts: {', '.join(charts)}\n\n"
-        "Provide a comprehensive, data-driven narrative that synthesizes these findings. "
-        "Highlight key statistical insights, potential data patterns, and actionable recommendations. "
-        "Use a professional, analytical tone with clear, concise language."
+    return ["correlation_heatmap.png", "outlier_detection.png", "pairplot_analysis.png"]
+
+def narrate_story(summary, insights, charts, special_analyses):
+    """Generate a narrative story about the analysis."""
+    special_analyses_summary = "\n".join(
+        f"{key.capitalize()} Analysis:\n" + "\n".join(value)
+        for key, value in special_analyses.items()
     )
-    
-    return query_chat_completion(narrative_prompt)
+    prompt = (
+        f"The dataset has the following properties:\n{summary}\n"
+        f"Insights:\n{insights}\n"
+        f"Special Analyses:\n{special_analyses_summary}\n"
+        f"The visualizations generated are: {', '.join(charts)}.\n"
+        "Please summarize the dataset, describe the analysis performed, key findings, and any implications in Markdown format. "
+        "Do not include code block delimiters like ```markdown or similar at the start or end of the Markdown text. "
+        "Ensure the content is directly usable as a Markdown file without requiring edits."
+    )
+    return query_chat_completion(prompt)
 
 def save_readme(content, charts):
     """Save narrative and charts as README.md."""
@@ -274,11 +219,12 @@ def save_readme(content, charts):
         for chart in charts:
             file.write(f"![{chart}]({chart})\n")
 
+# Main execution
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 2:
-        print("Usage: python autolysis.py <dataset.csv>")
+        print("Usage: uv run autolysis.py <dataset.csv>")
         sys.exit(1)
 
     dataset = sys.argv[1]
@@ -287,7 +233,7 @@ if __name__ == "__main__":
         # Load the dataset
         df = load_data(dataset)
 
-        # Perform generic analysis
+        # Perform analysis
         summary = generic_analysis(df)
         print("Generic analysis completed.")
 
@@ -297,33 +243,22 @@ if __name__ == "__main__":
         # Perform special analyses
         special_analyses = perform_special_analyses(df, feature_types)
 
-        # Perform advanced statistical analysis
-        advanced_analysis = advanced_statistical_analysis(df)
-        print("Advanced statistical analysis completed.")
-
-        # Query the LLM for initial insights
+        # Query the LLM for additional insights
         insights = query_chat_completion(
-            f"Analyze this dataset summary:\n{summary}\n"
-            f"Advanced Analysis Hints:\n{advanced_analysis}\n"
-            "Provide initial insights, potential correlations, and data quality observations."
+            f"Analyze this dataset summary:\n{summary}\nProvide key insights and any suggestions for improvement."
         )
         print("LLM insights retrieved.")
 
-        # Create enhanced visualizations
-        charts = create_enhanced_visualizations(df)
-        print("Enhanced visualizations created.")
+        # Create visualizations
+        charts = create_visualizations(df)
+        print("Visualizations created.")
 
-        # Generate comprehensive narrative
-        story = narrate_comprehensive_story(
-            summary, insights, advanced_analysis, charts, special_analyses
-        )
-        print("Comprehensive narrative created.")
+        # Narrate the story
+        story = narrate_story(summary, insights, charts, special_analyses)
+        print("Narrative created.")
 
         # Save README.md
         save_readme(story, charts)
-        print("README.md generated with comprehensive analysis.")
-
+        print("README.md generated.")
     except Exception as e:
-        import traceback
         print("Error:", e)
-        traceback.print_exc()
