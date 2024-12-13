@@ -205,6 +205,24 @@ def create_visualizations(df):
 
     return ["correlation_heatmap.png", "outlier_detection.png", "pairplot_analysis.png"]
 
+def analyze_image_with_vision_api(image_path, model="gpt-4o-mini"):
+    """Analyze an image using the OpenAI Vision API."""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {AIPROXY_TOKEN}"
+    }
+    payload = {
+        "model": model,  
+        "image_path": image_path,
+        "detail": "low"  
+    }
+    try:
+        response = requests.post(BASE_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json().get("analysis", "No analysis content returned.")
+    except requests.RequestException as e:
+        raise Exception(f"Error during Vision API query: {e}")
+
 def narrate_story(summary, insights, charts, special_analyses):
     """Generate a narrative story about the analysis."""
     special_analyses_summary = "\n".join(
@@ -217,7 +235,7 @@ def narrate_story(summary, insights, charts, special_analyses):
         f"Special Analyses:\n{special_analyses_summary}\n"
         f"The visualizations generated are: {', '.join(charts)}.\n"
         "Please summarize the dataset, describe the analysis performed, key findings, and any implications in Markdown format. "
-        "Do not include code block delimiters like ```markdown or similar at the start or end of the Markdown text. " 
+        "Do not include code block delimiters like ```markdown or similar at the start or end of the Markdown text. "
         "Ensure the content is directly usable as a Markdown file without requiring edits."
     )
     return query_chat_completion(prompt)
