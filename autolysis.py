@@ -23,6 +23,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.cluster import KMeans
 from dotenv import load_dotenv
 import chardet
+import base64
 
 # Load environment variables
 load_dotenv()
@@ -205,6 +206,10 @@ def create_visualizations(df):
 
     return ["correlation_heatmap.png", "outlier_detection.png", "pairplot_analysis.png"]
 
+def image_to_base64(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode("utf-8")
+
 def analyze_image_with_vision_api(image_path, model="gpt-4o-mini"):
     """Analyze an image using the OpenAI Vision API."""
     headers = {
@@ -212,33 +217,36 @@ def analyze_image_with_vision_api(image_path, model="gpt-4o-mini"):
         "Authorization": f"Bearer {AIPROXY_TOKEN}"
     }
     payload = {
-        "model": model,  
-        "image_path": image_path,
-        "detail": "low"  
+    "model": model,
+    "messages": [{"role": "user", "content": "Analyze this image."}],
+    "image": image_to_base64(image_path),
     }
-    try:
-        response = requests.post(BASE_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json().get("analysis", "No analysis content returned.")
-    except requests.RequestException as e:
-        raise Exception(f"Error during Vision API query: {e}")
+    response = requests.post(BASE_URL, headers=headers, json=payload)
 
 def narrate_story(summary, insights, charts, special_analyses):
-    """Generate a narrative story about the analysis."""
+    """Generate a narrative story about the analysis, including image analysis."""
+    image_analyses = []
+    for chart in charts:
+        analysis = analyze_image_with_vision_api(chart)
+        image_analyses.append(f"Analysis for {chart}: {analysis}")
+
     special_analyses_summary = "\n".join(
         f"{key.capitalize()} Analysis:\n" + "\n".join(value)
         for key, value in special_analyses.items()
     )
+
     prompt = (
         f"The dataset has the following properties:\n{summary}\n"
         f"Insights:\n{insights}\n"
         f"Special Analyses:\n{special_analyses_summary}\n"
+        f"Image Analyses:\n{'\n'.join(image_analyses)}\n"
         f"The visualizations generated are: {', '.join(charts)}.\n"
         "Please summarize the dataset, describe the analysis performed, key findings, and any implications in Markdown format. "
         "Do not include code block delimiters like ```markdown or similar at the start or end of the Markdown text. "
         "Ensure the content is directly usable as a Markdown file without requiring edits."
     )
     return query_chat_completion(prompt)
+
 
 def save_readme(content, charts):
     """Save narrative and charts as README.md."""
