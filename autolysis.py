@@ -50,7 +50,7 @@ def query_chat_completion(prompt, model="gpt-4o-mini"):
     except requests.RequestException as e:
         raise Exception(f"Error during LLM query: {e}")
 
-    
+
 def detect_file_encoding(filepath):
     """Detect the encoding of a file."""
     with open(filepath, "rb") as file:
@@ -83,13 +83,16 @@ def load_data(filename):
 
 def generic_analysis(df):
     """Perform generic analysis on the dataset."""
-    return {
+    analysis = {
         "shape": df.shape,
         "columns": df.columns.tolist(),
         "dtypes": df.dtypes.to_dict(),
         "missing_values": df.isnull().sum().to_dict(),
         "summary_stats": df.describe(include="all").to_dict(),
+        "variance": df.var(numeric_only=True).to_dict(),
+        "skewness": df.skew(numeric_only=True).to_dict()
     }
+    return analysis
 
 def preprocess_data(df):
     """Preprocess data to handle missing values."""
@@ -165,6 +168,8 @@ def create_visualizations(df):
         plt.figure(figsize=(10, 8))
         sns.heatmap(numeric_df.corr(), annot=True, cmap="coolwarm", cbar_kws={'shrink': 0.8})
         plt.title("Correlation Heatmap", fontsize=16)
+        plt.xlabel("Features")
+        plt.ylabel("Features")
         plt.savefig("correlation_heatmap.png")
         plt.close()
 
@@ -175,13 +180,16 @@ def create_visualizations(df):
         plt.figure(figsize=(8, 6))
         sns.scatterplot(data=visualization_df, x=visualization_df.columns[0], y=visualization_df.columns[1], hue='outlier_score', palette="Set1")
         plt.title("Outlier Detection (Scatter Plot)", fontsize=16)
+        plt.xlabel(visualization_df.columns[0])
+        plt.ylabel(visualization_df.columns[1])
+        plt.legend(title="Outliers")
         plt.savefig("outlier_detection.png")
         plt.close()
 
     # Pair Plot for Relationship Analysis (limited columns)
     if visualization_df.shape[1] > 1:
         selected_columns = visualization_df.columns[:5]  # Limit to first 5 numeric columns
-        sns.pairplot(visualization_df[selected_columns])
+        sns.pairplot(visualization_df[selected_columns], palette="husl")
         plt.savefig("pairplot_analysis.png")
         plt.close()
 
@@ -190,6 +198,8 @@ def create_visualizations(df):
         plt.figure(figsize=(8, 6))
         sns.histplot(visualization_df[col], kde=True, color="skyblue")
         plt.title(f"Distribution of {col}", fontsize=16)
+        plt.xlabel(col)
+        plt.ylabel("Frequency")
         plt.savefig(f"distribution_{col}.png")
         plt.close()
 
@@ -207,7 +217,7 @@ def narrate_story(summary, insights, charts, special_analyses):
         f"Special Analyses:\n{special_analyses_summary}\n"
         f"The visualizations generated are: {', '.join(charts)}.\n"
         "Please summarize the dataset, describe the analysis performed, key findings, and any implications in Markdown format. "
-        "Do not include code block delimiters like ```markdown or similar at the start or end of the Markdown text. "
+        "Do not include code block delimiters like ```markdown or similar at the start or end of the Markdown text. " 
         "Ensure the content is directly usable as a Markdown file without requiring edits."
     )
     return query_chat_completion(prompt)
@@ -262,3 +272,4 @@ if __name__ == "__main__":
         print("README.md generated.")
     except Exception as e:
         print("Error:", e)
+
