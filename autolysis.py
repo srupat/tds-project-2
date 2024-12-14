@@ -24,6 +24,7 @@ from sklearn.cluster import KMeans
 from dotenv import load_dotenv
 import chardet
 import base64
+from functools import lru_cache
 
 # Load environment variables
 load_dotenv()
@@ -34,8 +35,9 @@ if not AIPROXY_TOKEN:
 
 BASE_URL = "http://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
 
+@lru_cache(maxsize=10)
 def query_chat_completion(prompt, model="gpt-4o-mini"):
-    """Send a chat prompt to the LLM and return the response."""
+    """Send a chat prompt to the LLM and cache results to optimize API interactions."""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {AIPROXY_TOKEN}"
@@ -159,6 +161,58 @@ def perform_special_analyses(df, feature_types):
 
     return analyses
 
+def advanced_analysis(df):
+    """Perform advanced statistical and exploratory data analysis."""
+    analysis = {}
+
+    # Correlation analysis for significant features
+    correlation_matrix = df.corr()
+    high_corr_pairs = correlation_matrix.abs().unstack().sort_values(ascending=False)
+    significant_corr = high_corr_pairs[high_corr_pairs > 0.7].drop_duplicates()
+    analysis["significant_correlations"] = significant_corr.to_dict()
+
+    # Hypothesis testing example: Chi-Square test for independence (categorical data)
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    if len(categorical_cols) > 1:
+        from scipy.stats import chi2_contingency
+        chi_results = {}
+        for i in range(len(categorical_cols)):
+            for j in range(i + 1, len(categorical_cols)):
+                contingency_table = pd.crosstab(df[categorical_cols[i]], df[categorical_cols[j]])
+                chi2, p, _, _ = chi2_contingency(contingency_table)
+                chi_results[f"{categorical_cols[i]} vs {categorical_cols[j]}"] = {"chi2": chi2, "p_value": p}
+        analysis["chi_square_tests"] = chi_results
+
+    # Clustering insights with KMeans
+    if len(df.select_dtypes(include=['float', 'int']).columns) > 1:
+        kmeans = KMeans(n_clusters=3, random_state=42).fit(df.select_dtypes(include=['float', 'int']))
+        analysis["kmeans_clusters"] = pd.Series(kmeans.labels_).value_counts().to_dict()
+
+    return analysis
+
+def adapt_prompt_based_on_data(data_summary, feature_types):
+    """Generate dynamic prompts based on dataset properties."""
+    if len(data_summary["columns"]) > 50:
+        return "The dataset has many columns. Focus on identifying the most critical features and summarizing insights concisely."
+    elif "time_series" in feature_types and feature_types["time_series"]:
+        return "The dataset contains time-series data. Provide detailed temporal trends and predictions."
+    else:
+        return "Analyze the dataset comprehensively and highlight correlations, distributions, and any anomalies."
+
+
+def agentic_workflow(data_summary, feature_types):
+    """Perform iterative multi-step analysis based on LLM responses."""
+    prompt = adapt_prompt_based_on_data(data_summary, feature_types)
+    initial_insights = query_chat_completion(prompt)
+
+    # Use initial insights to refine the next step
+    if "missing values" in initial_insights.lower():
+        refinement_prompt = "You mentioned missing values. Suggest specific imputation strategies based on data types."
+        refinement = query_chat_completion(refinement_prompt)
+        return initial_insights + "\n" + refinement
+    else:
+        return initial_insights
+
 def create_visualizations(df):
     """Generate and save visualizations based on data."""
     numeric_df = preprocess_data(df)
@@ -223,27 +277,24 @@ def analyze_image_with_vision_api(image_path, model="gpt-4o-mini"):
     }
     response = requests.post(BASE_URL, headers=headers, json=payload)
 
-def narrate_story(summary, insights, charts, special_analyses):
-    """Generate a narrative story about the analysis, including image analysis."""
-    image_analyses = []
-    for chart in charts:
-        analysis = analyze_image_with_vision_api(chart)
-        image_analyses.append(f"Analysis for {chart}: {analysis}")
-
+def narrate_story(summary, insights, advanced_analyses, charts, special_analyses):
+    """Generate a cohesive and structured narrative story."""
     special_analyses_summary = "\n".join(
         f"{key.capitalize()} Analysis:\n" + "\n".join(value)
         for key, value in special_analyses.items()
     )
-
+    advanced_analyses_summary = "\n".join(
+        f"{key.capitalize()} Findings:\n{value}" for key, value in advanced_analyses.items()
+    )
     prompt = (
         f"The dataset has the following properties:\n{summary}\n"
         f"Insights:\n{insights}\n"
+        f"Advanced Analysis:\n{advanced_analyses_summary}\n"
         f"Special Analyses:\n{special_analyses_summary}\n"
-        f"Image Analyses:\n{'\n'.join(image_analyses)}\n"
         f"The visualizations generated are: {', '.join(charts)}.\n"
-        "Please summarize the dataset, describe the analysis performed, key findings, and any implications in Markdown format. "
-        "Do not include code block delimiters like ```markdown or similar at the start or end of the Markdown text. "
-        "Ensure the content is directly usable as a Markdown file without requiring edits."
+        "Please generate a well-structured Markdown report covering data properties, analysis, insights, visualizations, and implications. "
+        "Ensure that the content flows logically and highlights key findings with proper emphasis. "
+        "Use headings, bullet points, and descriptions to enhance readability."
     )
     return query_chat_completion(prompt)
 
@@ -255,7 +306,7 @@ def save_readme(content, charts):
         for chart in charts:
             file.write(f"![{chart}]({chart})\n")
 
-# Main execution
+# Main Execution
 if __name__ == "__main__":
     import sys
 
@@ -272,6 +323,12 @@ if __name__ == "__main__":
         # Perform analysis
         summary = generic_analysis(df)
         print("Generic analysis completed.")
+        
+        df = preprocess_data(df)
+
+        # Advanced Analysis
+        advanced_analyses = advanced_analysis(df)
+        print("Advanced analysis completed.")
 
         # Detect feature types
         feature_types = detect_feature_types(df)
@@ -279,10 +336,8 @@ if __name__ == "__main__":
         # Perform special analyses
         special_analyses = perform_special_analyses(df, feature_types)
 
-        # Query the LLM for additional insights
-        insights = query_chat_completion(
-            f"Analyze this dataset summary:\n{summary}\nProvide key insights and any suggestions for improvement."
-        )
+        # Multi-step insights using agentic workflow
+        insights = agentic_workflow(summary, feature_types)
         print("LLM insights retrieved.")
 
         # Create visualizations
@@ -290,7 +345,7 @@ if __name__ == "__main__":
         print("Visualizations created.")
 
         # Narrate the story
-        story = narrate_story(summary, insights, charts, special_analyses)
+        story = narrate_story(summary, insights, advanced_analyses, charts, special_analyses)
         print("Narrative created.")
 
         # Save README.md
@@ -298,4 +353,3 @@ if __name__ == "__main__":
         print("README.md generated.")
     except Exception as e:
         print("Error:", e)
-
